@@ -1,0 +1,21 @@
+games_count:
+  query: "SELECT COUNT(*) AS games_count FROM games"
+  metrics:
+    - games_count:
+        usage: "GAUGE"
+        description: "Games count"
+pg_stat_statements:
+  query: "SELECT 1.0 * sum(total_exec_time) / sum(calls) as reply_time, sum(calls) as QPS FROM pg_stat_statements"
+  metrics:
+    - reply_time:
+        usage: "GAUGE"
+        description: "Average reply time"
+    - QPS:
+        usage: "GAUGE"
+        description: "Queries per second"
+pg_stat_database:
+  query: "SELECT sum(xact_commit) + sum(xact_rollback) as TPS FROM pg_stat_database"
+  metrics:
+    - TPS:
+        usage: "GAUGE"
+        description: "Transactions per second"

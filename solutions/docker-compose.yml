@@ -1,0 +1,126 @@
+version: "3.9"
+
+volumes:
+  scripts:
+
+name: "db-hw3"
+
+
+networks:
+    patronistream:
+
+services:
+  etcd1: &etcd
+    image: patroni
+    networks: [ patronistream ]
+    environment:
+      ETCD_LISTEN_PEER_URLS: http://0.0.0.0:2380
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379 
+      ETCD_INITIAL_CLUSTER: etcd1=http://etcd1:2380,etcd2=http://etcd2:2380 
+      ETCD_INITIAL_CLUSTER_STATE: new 
+      ETCD_INITIAL_CLUSTER_TOKEN: kosandron-cluster
+      ETCD_UNSUPPORTED_ARCH: arm64
+    container_name: etcd1
+    hostname: etcd1
+    command: etcd --name etcd1 --initial-advertise-peer-urls http://etcd1:2380
+
+  etcd2:
+    <<: *etcd
+    container_name: etcd2
+    hostname: etcd2
+    command: etcd --name etcd2 --initial-advertise-peer-urls http://etcd2:2380 
+
+  haproxy:
+    image: patroni
+
+    networks: [ patronistream ]
+    volumes:
+      - ./scripts:/docker-entrypoint-initdb.d
+      - ./docker-compose.yml:/app/resources/docker-compose.yml
+      - ./test.sh:/app/resources/test.sh
+      - ./analyze:/app/analyze
+      - ./indexes:/app/indexes
+      - ./partitions:/app/partitions
+      - ./queries:/app/queries
+      - ./backup:/app/backup
+    env_file: 
+      - patroni.env
+      - .env
+    hostname: haproxy
+    container_name: haproxy
+    ports: 
+      - "${POSTGRES_PORT}:5000"
+      - "5001:5001"
+    command: haproxy
+    environment: &haproxy_env
+      ETCDCTL_ENDPOINTS: http://etcd1:2379,http://etcd2:2379
+      PATRONI_ETCD3_HOSTS: "'etcd1:2379','etcd2:2379'" 
+      PATRONI_SCOPE: patronistream
+
+  patroni1:
+    image: patroni
+    networks: [ patronistream ]
+    env_file: patroni.env
+    hostname: patroni1
+    container_name: patroni1
+    volumes: 
+      - ./scripts:/docker-entrypoint-initdb.d
+      - ./docker-compose.yml:/app/resources/docker-compose.yml
+      - ./test.sh:/app/resources/test.sh
+      - ./analyze:/app/analyze
+      - ./indexes:/app/indexes
+      - ./partitions:/app/partitions
+      - ./queries:/app/queries
+      - ./backup:/app/backup
+    environment:
+      <<: *haproxy_env
+      PATRONI_NAME: patroni1
+
+  patroni2:
+    image: patroni
+    networks: [ patronistream ]
+    env_file: patroni.env
+    hostname: patroni2
+    container_name: patroni2
+    volumes:
+      - ./scripts:/docker-entrypoint-initdb.d
+      - ./docker-compose.yml:/app/resources/docker-compose.yml
+      - ./test.sh:/app/resources/test.sh
+      - ./analyze:/app/analyze
+      - ./indexes:/app/indexes
+      - ./partitions:/app/partitions
+      - ./queries:/app/queries
+      - ./backup:/app/backup
+    environment:
+      <<: *haproxy_env
+      PATRONI_NAME: patroni2
+
+  grafana:
+    image: grafana/grafana
+    networks: [ patronistream ]
+    ports:
+      - 3000:3000
+
+  prometheus:
+    image: prom/prometheus
+    networks: [ patronistream ]
+    ports:
+      - 9090:9090
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter
+    networks: [ patronistream ]
+    ports:
+      - 9187:9187
+    volumes:
+      - ./settings/queries.yml:/home/queries.yml
+    env_file: 
+        - .env
+    environment:
+      DATA_SOURCE_NAME: "postgresql://kosandron:1234@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=disable"
+      PG_EXPORTER_EXTEND_QUERY_PATH: ./home/queries.yml
+    links:
+      - haproxy
+      - prometheus
